@@ -1,4 +1,4 @@
-import psycopg2
+import pg8000.native
 from nyct_gtfs import NYCTFeed
 from dotenv import load_dotenv
 import os
@@ -6,16 +6,16 @@ from datetime import datetime
 
 load_dotenv()
 
-# All subway lines to track
 LINES = ['1', 'A', 'B', 'G', 'J', 'N', 'L', '7', 'S']
 
 def get_db_connection():
-    return psycopg2.connect(
+    return pg8000.native.Connection(
         host=os.getenv('DB_HOST'),
-        port=os.getenv('DB_PORT'),
+        port=int(os.getenv('DB_PORT', 5432)),
         database=os.getenv('DB_NAME'),
         user=os.getenv('DB_USER'),
-        password=os.getenv('DB_PASSWORD')
+        password=os.getenv('DB_PASSWORD'),
+        ssl_context=True
     )
 
 def scrape_all_feeds():
@@ -27,19 +27,11 @@ def scrape_all_feeds():
         try:
             feed = NYCTFeed(line)
             trains = feed.trips
-            
             delayed = 0
+            
             for train in trains:
                 for stop in train.stop_time_updates:
-                    delay_seconds = 0
-                    if hasattr(stop, 'arrival') and stop.arrival:
-                        try:
-                            scheduled = stop.arrival
-                            # Count trains that have delays
-                            delay_seconds = getattr(stop, 'delay', 0) or 0
-                        except:
-                            pass
-                    
+                    delay_seconds = getattr(stop, 'delay', 0) or 0
                     if delay_seconds > 60:
                         all_delays.append({
                             'line': line,
@@ -55,25 +47,17 @@ def scrape_all_feeds():
         except Exception as e:
             print(f"  Line {line}: Error - {e}")
     
-    # Save to database
     if all_delays:
         conn = get_db_connection()
-        cur = conn.cursor()
-        
         for delay in all_delays:
-            cur.execute("""
-                INSERT INTO delays (line, stop_id, delay_seconds, delay_minutes, timestamp)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (
-                delay['line'],
-                delay['stop_id'],
-                delay['delay_seconds'],
-                delay['delay_minutes'],
-                delay['timestamp']
-            ))
-        
-        conn.commit()
-        cur.close()
+            conn.run(
+                "INSERT INTO delays (line, stop_id, delay_seconds, delay_minutes, timestamp) VALUES (:line, :stop_id, :delay_seconds, :delay_minutes, :timestamp)",
+                line=delay['line'],
+                stop_id=delay['stop_id'],
+                delay_seconds=delay['delay_seconds'],
+                delay_minutes=delay['delay_minutes'],
+                timestamp=delay['timestamp']
+            )
         conn.close()
         print(f"✅ Saved {len(all_delays)} delays to database")
     else:
