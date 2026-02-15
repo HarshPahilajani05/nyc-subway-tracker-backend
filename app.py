@@ -2,12 +2,15 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 import pg8000.native
+import resend
 import os
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
+resend.api_key = os.getenv('RESEND_API_KEY')
 
 def get_db_connection():
     return pg8000.native.Connection(
@@ -153,6 +156,42 @@ def upvote_report(report_id):
     conn.run(
         "UPDATE reports SET upvotes = upvotes + 1 WHERE id = :id",
         id=report_id
+    )
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/subscribe', methods=['POST'])
+def subscribe():
+    data = request.get_json()
+    email = data.get('email')
+    line = data.get('line')
+
+    if not email or not line:
+        return jsonify({'error': 'Email and line required'}), 400
+
+    conn = get_db_connection()
+    try:
+        conn.run(
+            "INSERT INTO email_subscriptions (email, line) VALUES (:email, :line)",
+            email=email, line=line
+        )
+        conn.close()
+        return jsonify({'success': True, 'message': f'Subscribed to Line {line} alerts!'})
+    except Exception as e:
+        conn.close()
+        if 'unique' in str(e).lower():
+            return jsonify({'success': True, 'message': 'Already subscribed!'})
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/unsubscribe', methods=['POST'])
+def unsubscribe():
+    data = request.get_json()
+    email = data.get('email')
+    line = data.get('line')
+    conn = get_db_connection()
+    conn.run(
+        "DELETE FROM email_subscriptions WHERE email = :email AND line = :line",
+        email=email, line=line
     )
     conn.close()
     return jsonify({'success': True})
