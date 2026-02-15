@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 import pg8000.native
@@ -115,6 +115,47 @@ def get_line_history(line):
             'avg_delay': str(row[2])
         })
     return jsonify(result)
+
+@app.route('/api/reports', methods=['POST'])
+def submit_report():
+    data = request.get_json()
+    line = data.get('line')
+    issue_type = data.get('issue_type')
+    description = data.get('description', '')
+    conn = get_db_connection()
+    conn.run(
+        "INSERT INTO reports (line, issue_type, description) VALUES (:line, :issue_type, :description)",
+        line=line, issue_type=issue_type, description=description
+    )
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/reports/<line>', methods=['GET'])
+def get_reports(line):
+    conn = get_db_connection()
+    reports = conn.run(
+        "SELECT id, line, issue_type, description, upvotes, created_at FROM reports WHERE line = :line AND created_at > NOW() - INTERVAL '2 hours' ORDER BY created_at DESC",
+        line=line
+    )
+    conn.close()
+    return jsonify([{
+        'id': r[0],
+        'line': r[1],
+        'issue_type': r[2],
+        'description': r[3],
+        'upvotes': r[4],
+        'created_at': str(r[5])
+    } for r in reports])
+
+@app.route('/api/reports/<int:report_id>/upvote', methods=['POST'])
+def upvote_report(report_id):
+    conn = get_db_connection()
+    conn.run(
+        "UPDATE reports SET upvotes = upvotes + 1 WHERE id = :id",
+        id=report_id
+    )
+    conn.close()
+    return jsonify({'success': True})
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
