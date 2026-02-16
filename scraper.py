@@ -6,7 +6,9 @@ from datetime import datetime
 
 load_dotenv()
 
-LINES = ['1', 'A', 'B', 'G', 'J', 'N', 'L', '7', 'S']
+LINES = ['1', '2', '3', '4', '5', '6', '7', 
+         'A', 'C', 'E', 'B', 'D', 'F', 'M', 
+         'G', 'J', 'Z', 'L', 'N', 'Q', 'R', 'W', 'S']
 
 def get_db_connection():
     return pg8000.native.Connection(
@@ -32,7 +34,7 @@ def scrape_all_feeds():
             for train in trains:
                 for stop in train.stop_time_updates:
                     delay_seconds = getattr(stop, 'delay', 0) or 0
-                    if delay_seconds > 60:
+                    if delay_seconds > 120:
                         all_delays.append({
                             'line': line,
                             'stop_id': stop.stop_id,
