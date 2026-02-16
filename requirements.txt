@@ -6,3 +6,4 @@ schedule==1.2.0
 nyct-gtfs==2.1.0
 gunicorn==21.2.0
 pg8000==1.31.1
+resend==2.0.0
