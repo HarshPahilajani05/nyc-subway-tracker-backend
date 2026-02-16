@@ -133,7 +133,6 @@ def submit_report():
     conn.close()
     return jsonify({'success': True})
 
-# ✅ NEW ROUTE — defined before /api/reports/<line>
 @app.route('/api/reports/recent', methods=['GET'])
 def get_recent_reports():
     limit = request.args.get('limit', 10, type=int)
@@ -182,6 +181,24 @@ def upvote_report(report_id):
     )
     conn.close()
     return jsonify({'success': True})
+
+# ✅ NEW — alerts route
+@app.route('/api/alerts/<line>', methods=['GET'])
+def get_alerts(line):
+    conn = get_db_connection()
+    alerts = conn.run(
+        "SELECT id, line, alert_type, header, description, created_at FROM alerts WHERE line = :line ORDER BY created_at DESC",
+        line=line.upper()
+    )
+    conn.close()
+    return jsonify([{
+        'id': a[0],
+        'line': a[1],
+        'alert_type': a[2],
+        'header': a[3],
+        'description': a[4],
+        'created_at': str(a[5])
+    } for a in alerts])
 
 @app.route('/api/subscribe', methods=['POST'])
 def subscribe():
