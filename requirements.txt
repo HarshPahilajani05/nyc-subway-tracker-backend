@@ -8,3 +8,4 @@ gunicorn==21.2.0
 pg8000==1.31.1
 resend==2.0.0
 protobuf==4.25.3
+gtfs-realtime-bindings==1.0.0
