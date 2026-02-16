@@ -3,7 +3,7 @@ import time
 import os
 import resend
 import pg8000.native
-from scraper import scrape_all_feeds
+from scraper import scrape_all_feeds, scrape_alerts
 from datetime import datetime
 
 resend.api_key = os.getenv('RESEND_API_KEY')
@@ -22,7 +22,6 @@ def send_delay_alerts():
     try:
         conn = get_db_connection()
         
-        # Get lines with delays in the last 5 minutes
         delayed_lines = conn.run("""
             SELECT DISTINCT line, ROUND(AVG(delay_minutes)::numeric, 1) as avg_delay
             FROM delays
@@ -38,7 +37,6 @@ def send_delay_alerts():
             line = row[0]
             avg_delay = row[1]
             
-            # Check if we already sent an alert for this line in the last hour
             already_sent = conn.run("""
                 SELECT COUNT(*) FROM email_alert_log
                 WHERE line = :line AND sent_at > NOW() - INTERVAL '1 hour'
@@ -47,7 +45,6 @@ def send_delay_alerts():
             if already_sent[0][0] > 0:
                 continue
             
-            # Get all subscribers for this line
             subscribers = conn.run(
                 "SELECT email FROM email_subscriptions WHERE line = :line",
                 line=line
@@ -56,7 +53,6 @@ def send_delay_alerts():
             if not subscribers:
                 continue
             
-            # Send email to each subscriber
             for sub in subscribers:
                 email = sub[0]
                 try:
@@ -89,7 +85,6 @@ def send_delay_alerts():
                 except Exception as e:
                     print(f"Failed to send email to {email}: {e}")
             
-            # Log that we sent alerts for this line
             conn.run(
                 "INSERT INTO email_alert_log (email, line) VALUES ('batch', :line)",
                 line=line
@@ -102,6 +97,7 @@ def send_delay_alerts():
 
 def run_scraper_and_alerts():
     scrape_all_feeds()
+    scrape_alerts()
     send_delay_alerts()
 
 print("🚇 NYC Subway Tracker - Auto Scheduler Started")
