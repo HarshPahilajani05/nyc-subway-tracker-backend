@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import os
 import requests
 from datetime import datetime
-from google.transit import gtfs_realtime_pb2
+import struct
 
 load_dotenv()
 
@@ -12,7 +12,7 @@ LINES = ['1', '2', '3', '4', '5', '6', '7',
          'A', 'C', 'E', 'B', 'D', 'F', 'M', 
          'G', 'J', 'Z', 'L', 'N', 'Q', 'R', 'W', 'S']
 
-ALERT_FEED_URL = 'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Fsubway-alerts'
+ALERT_FEED_URL = 'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Fsubway-alerts.json'
 
 def get_db_connection():
     return pg8000.native.Connection(
@@ -77,37 +77,50 @@ def scrape_alerts():
     try:
         response = requests.get(ALERT_FEED_URL)
         response.raise_for_status()
-
-        feed = gtfs_realtime_pb2.FeedMessage()
-        feed.ParseFromString(response.content)
-
+        
+        data = response.json()
+        
         conn = get_db_connection()
         conn.run("DELETE FROM alerts")
 
         alerts_saved = 0
+        
+        if 'entity' not in data:
+            print("  No entities in feed")
+            conn.close()
+            return
 
-        for entity in feed.entity:
-            if not entity.HasField('alert'):
+        for entity in data.get('entity', []):
+            if 'alert' not in entity:
                 continue
-
-            alert = entity.alert
-
+                
+            alert = entity['alert']
+            
+            # Get affected lines
             affected_lines = set()
-            for informed in alert.informed_entity:
-                route_id = informed.route_id.strip().upper()
+            for informed in alert.get('informed_entity', []):
+                route_id = informed.get('route_id', '').strip().upper()
                 if route_id in LINES:
                     affected_lines.add(route_id)
-
+            
             if not affected_lines:
                 continue
-
+            
+            # Get header and description
             header = ''
             description = ''
-            if alert.header_text.translation:
-                header = alert.header_text.translation[0].text
-            if alert.description_text.translation:
-                description = alert.description_text.translation[0].text
-
+            
+            if 'header_text' in alert and 'translation' in alert['header_text']:
+                translations = alert['header_text']['translation']
+                if translations:
+                    header = translations[0].get('text', '')
+            
+            if 'description_text' in alert and 'translation' in alert['description_text']:
+                translations = alert['description_text']['translation']
+                if translations:
+                    description = translations[0].get('text', '')
+            
+            # Determine alert type
             header_lower = header.lower()
             if 'delay' in header_lower:
                 alert_type = 'delay'
@@ -123,7 +136,7 @@ def scrape_alerts():
                 alert_type = 'planned_work'
             else:
                 alert_type = 'service_change'
-
+            
             for line in affected_lines:
                 conn.run(
                     """INSERT INTO alerts (line, alert_type, header, description, created_at)
