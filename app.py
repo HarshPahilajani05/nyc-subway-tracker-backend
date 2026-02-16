@@ -133,6 +133,29 @@ def submit_report():
     conn.close()
     return jsonify({'success': True})
 
+# ✅ NEW ROUTE — defined before /api/reports/<line>
+@app.route('/api/reports/recent', methods=['GET'])
+def get_recent_reports():
+    limit = request.args.get('limit', 10, type=int)
+    conn = get_db_connection()
+    reports = conn.run(
+        """SELECT id, line, issue_type, description, upvotes, created_at 
+           FROM reports 
+           WHERE created_at > NOW() - INTERVAL '2 hours' 
+           ORDER BY created_at DESC 
+           LIMIT :limit""",
+        limit=limit
+    )
+    conn.close()
+    return jsonify([{
+        'id': r[0],
+        'line': r[1],
+        'issue_type': r[2],
+        'description': r[3],
+        'upvotes': r[4],
+        'created_at': str(r[5])
+    } for r in reports])
+
 @app.route('/api/reports/<line>', methods=['GET'])
 def get_reports(line):
     conn = get_db_connection()
