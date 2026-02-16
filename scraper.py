@@ -2,13 +2,17 @@ import pg8000.native
 from nyct_gtfs import NYCTFeed
 from dotenv import load_dotenv
 import os
+import requests
 from datetime import datetime
+from google.transit import gtfs_realtime_pb2
 
 load_dotenv()
 
 LINES = ['1', '2', '3', '4', '5', '6', '7', 
          'A', 'C', 'E', 'B', 'D', 'F', 'M', 
          'G', 'J', 'Z', 'L', 'N', 'Q', 'R', 'W', 'S']
+
+ALERT_FEED_URL = 'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Fsubway-alerts'
 
 def get_db_connection():
     return pg8000.native.Connection(
@@ -67,5 +71,78 @@ def scrape_all_feeds():
     
     print(f"✅ Done!\n")
 
+def scrape_alerts():
+    print(f"\n🚨 Scraping MTA service alerts at {datetime.now().strftime('%H:%M:%S')}...")
+
+    try:
+        response = requests.get(ALERT_FEED_URL)
+        response.raise_for_status()
+
+        feed = gtfs_realtime_pb2.FeedMessage()
+        feed.ParseFromString(response.content)
+
+        conn = get_db_connection()
+        conn.run("DELETE FROM alerts")
+
+        alerts_saved = 0
+
+        for entity in feed.entity:
+            if not entity.HasField('alert'):
+                continue
+
+            alert = entity.alert
+
+            affected_lines = set()
+            for informed in alert.informed_entity:
+                route_id = informed.route_id.strip().upper()
+                if route_id in LINES:
+                    affected_lines.add(route_id)
+
+            if not affected_lines:
+                continue
+
+            header = ''
+            description = ''
+            if alert.header_text.translation:
+                header = alert.header_text.translation[0].text
+            if alert.description_text.translation:
+                description = alert.description_text.translation[0].text
+
+            header_lower = header.lower()
+            if 'delay' in header_lower:
+                alert_type = 'delay'
+            elif 'suspended' in header_lower:
+                alert_type = 'suspended'
+            elif 'skipped' in header_lower:
+                alert_type = 'stops_skipped'
+            elif 'express' in header_lower or 'local' in header_lower:
+                alert_type = 'express_to_local'
+            elif 'reduced' in header_lower:
+                alert_type = 'reduced_service'
+            elif 'planned' in header_lower:
+                alert_type = 'planned_work'
+            else:
+                alert_type = 'service_change'
+
+            for line in affected_lines:
+                conn.run(
+                    """INSERT INTO alerts (line, alert_type, header, description, created_at)
+                       VALUES (:line, :alert_type, :header, :description, :created_at)""",
+                    line=line,
+                    alert_type=alert_type,
+                    header=header,
+                    description=description,
+                    created_at=datetime.now()
+                )
+                alerts_saved += 1
+                print(f"  Alert for Line {line}: [{alert_type}] {header[:60]}...")
+
+        conn.close()
+        print(f"✅ Saved {alerts_saved} alerts to database\n")
+
+    except Exception as e:
+        print(f"❌ Failed to scrape alerts: {e}\n")
+
 if __name__ == "__main__":
     scrape_all_feeds()
+    scrape_alerts()
